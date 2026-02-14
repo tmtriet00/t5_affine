@@ -116,7 +116,7 @@ export class WebBackupService extends BaseBackupService {
         dispose();
       }
     } catch (e) {
-      console.error('Failed to export backup', e);
+      console.error('Failed to export backup.', e);
       this.error$.setValue(e);
     } finally {
       this.isLoading$.setValue(false);
