@@ -137,13 +137,13 @@ dependencies {
 }
 
 cargo {
-    module = "../../../../mobile-native"
+    module = "${project.rootDir}/../mobile-native"
     libname = "affine_mobile_native"
     features {
         defaultAnd("use-as-lib")
     }
     targets = ["arm64"]
-    pythonCommand = "python3"
+    pythonCommand = "/opt/homebrew/bin/python3"
     targetDirectory = "../../../../../../target"
     apiLevel = 28
     targetIncludes = ["libaffine_mobile_native.so"]

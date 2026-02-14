@@ -20,3 +20,14 @@ export function configureBackupModule(framework: Framework) {
     framework.impl(BackupService, WebBackupService, [WorkspacesService]);
   }
 }
+
+export { MobileFileProvider } from './providers';
+import { MobileFileProvider } from './providers';
+import { MobileBackupService } from './services';
+
+export function configureMobileBackupModule(framework: Framework) {
+  framework.impl(BackupService, MobileBackupService, [
+    WorkspacesService,
+    MobileFileProvider,
+  ]);
+}
