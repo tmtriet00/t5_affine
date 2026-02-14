@@ -69,7 +69,10 @@ export class DesktopBackupService extends BaseBackupService {
     return;
   }
 
-  async importBackup(_file: File): Promise<string> {
+  async importBackup(
+    _file?: File,
+    _targetWorkspaceId?: string
+  ): Promise<string> {
     return '';
   }
 

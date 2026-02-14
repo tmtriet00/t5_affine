@@ -54,7 +54,7 @@ import {
 export const LOCAL_WORKSPACE_LOCAL_STORAGE_KEY = 'affine-local-workspace';
 export const LOCAL_WORKSPACE_GLOBAL_STATE_KEY =
   'workspace-engine:local-workspace-ids:v1';
-const LOCAL_WORKSPACE_CHANGED_BROADCAST_CHANNEL_KEY =
+export const LOCAL_WORKSPACE_CHANGED_BROADCAST_CHANNEL_KEY =
   'affine-local-workspace-changed';
 
 const logger = new DebugLogger('local-workspace');

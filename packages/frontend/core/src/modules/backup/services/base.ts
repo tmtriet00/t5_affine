@@ -16,7 +16,10 @@ export abstract class BaseBackupService extends Service {
   abstract deleteBackupWorkspace(backupWorkspaceId: string): Promise<void>;
 
   abstract downloadBackup(workspaceId: string): Promise<void>;
-  abstract importBackup(file: File): Promise<string>;
+  abstract importBackup(
+    file?: File,
+    targetWorkspaceId?: string
+  ): Promise<string>;
 }
 
 export const BackupService =

@@ -1,4 +1,5 @@
 import { generateDocUpdate } from '@affine/nbstore';
+import { IndexedDBBlobStorage, IndexedDBDocStorage } from '@affine/nbstore/idb';
 import {
   catchErrorInto,
   effect,
@@ -11,6 +12,10 @@ import JSZip from 'jszip';
 import { switchMap, tap } from 'rxjs';
 
 import { WorkspacesService } from '../../workspace';
+import {
+  LOCAL_WORKSPACE_CHANGED_BROADCAST_CHANNEL_KEY,
+  setLocalWorkspaceIds,
+} from '../../workspace-engine/impls/local';
 import { BaseBackupService } from './base';
 
 export class WebBackupService extends BaseBackupService {
@@ -123,9 +128,27 @@ export class WebBackupService extends BaseBackupService {
     }
   }
 
-  async importBackup(file: File): Promise<string> {
+  async importBackup(file?: File, targetWorkspaceId?: string): Promise<string> {
     this.isLoading$.setValue(true);
     try {
+      // If no file provided on web, we need to prompt user to select one
+      if (!file) {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.zip';
+        const selectedFile = await new Promise<File>((resolve, reject) => {
+          input.onchange = () => {
+            if (input.files && input.files[0]) {
+              resolve(input.files[0]);
+            } else {
+              reject(new Error('No file selected'));
+            }
+          };
+          input.click();
+        });
+        file = selectedFile;
+      }
+
       const zip = await JSZip.loadAsync(file);
 
       // Validate backup file
@@ -135,13 +158,16 @@ export class WebBackupService extends BaseBackupService {
       }
 
       const info = JSON.parse(await infoFile.async('string'));
-      const workspaceId = info.workspaceId;
+      const backupWorkspaceId = info.workspaceId;
 
-      if (!workspaceId) {
+      if (!backupWorkspaceId) {
         throw new Error(
           'Invalid backup file: workspaceId missing in info.json'
         );
       }
+
+      // Determine which workspace ID to use
+      const workspaceId = targetWorkspaceId ?? backupWorkspaceId;
 
       // Load blob manifest if available
       const blobManifestFile = zip.file('blobs.json');
@@ -155,72 +181,16 @@ export class WebBackupService extends BaseBackupService {
         w => w.id === workspaceId
       );
 
-      if (!workspaceMeta) {
-        throw new Error(`Workspace ${workspaceId} not found`);
-      }
-
-      const { workspace, dispose } = this.workspacesService.open({
-        metadata: workspaceMeta,
-      });
-
-      try {
-        // Wait for root doc to be ready
-        await workspace.engine.doc.waitForDocReady(workspace.id);
-
-        const docStorage = workspace.engine.doc.storage;
-        const blobStorage = workspace.engine.blob.storage;
-
-        // Restore Docs
-        const docsFolder = zip.folder('docs');
-        if (docsFolder) {
-          const docEntries = Object.entries(docsFolder.files).filter(
-            ([path, entry]) => path.startsWith('docs/') && !entry.dir
-          );
-
-          for (const [filePath, entry] of docEntries) {
-            const fileName = filePath.split('/').pop();
-            if (!fileName) continue;
-            const docId = fileName.replace('.bin', '');
-            const docData = await entry.async('uint8array');
-            if (docData) {
-              const currentDoc = await docStorage.getDoc(docId);
-              if (currentDoc) {
-                const docUpdateBin = generateDocUpdate(currentDoc.bin, docData);
-                await docStorage.pushDocUpdate({
-                  docId: docId,
-                  bin: docUpdateBin,
-                });
-              }
-            }
-          }
-        }
-
-        // Restore Blobs
-        const blobsFolder = zip.folder('blobs');
-        if (blobsFolder) {
-          const blobEntries = Object.entries(blobsFolder.files).filter(
-            ([path, entry]) => path.startsWith('blobs/') && !entry.dir
-          );
-
-          for (const [filePath, entry] of blobEntries) {
-            const key = filePath.split('/').pop();
-            if (!key) continue;
-            const blobData = await entry.async('uint8array');
-            if (blobData) {
-              const mime =
-                blobManifest[key]?.mime || 'application/octet-stream';
-              await blobStorage.set({
-                key,
-                data: blobData,
-                mime,
-              });
-            }
-          }
-        }
-
-        return workspaceId;
-      } finally {
-        dispose();
+      if (workspaceMeta) {
+        // Workspace exists — merge into it
+        return await this.importIntoExistingWorkspace(
+          zip,
+          workspaceMeta,
+          blobManifest
+        );
+      } else {
+        // Workspace doesn't exist — create storage directly with this ID
+        return await this.importAsNewWorkspace(zip, workspaceId, blobManifest);
       }
     } catch (e) {
       console.error('Failed to import backup', e);
@@ -228,6 +198,158 @@ export class WebBackupService extends BaseBackupService {
       throw e;
     } finally {
       this.isLoading$.setValue(false);
+    }
+  }
+
+  private async importIntoExistingWorkspace(
+    zip: JSZip,
+    workspaceMeta: { id: string; flavour: string },
+    blobManifest: Record<string, { mime: string; size: number }>
+  ): Promise<string> {
+    const { workspace, dispose } = this.workspacesService.open({
+      metadata: workspaceMeta,
+    });
+
+    try {
+      await workspace.engine.doc.waitForDocReady(workspace.id);
+
+      const docStorage = workspace.engine.doc.storage;
+      const blobStorage = workspace.engine.blob.storage;
+
+      // Restore Docs
+      const docsFolder = zip.folder('docs');
+      if (docsFolder) {
+        const docEntries = Object.entries(docsFolder.files).filter(
+          ([path, entry]) => path.startsWith('docs/') && !entry.dir
+        );
+
+        for (const [filePath, entry] of docEntries) {
+          const fileName = filePath.split('/').pop();
+          if (!fileName) continue;
+          const docId = fileName.replace('.bin', '');
+          const docData = await entry.async('uint8array');
+          if (docData) {
+            const currentDoc = await docStorage.getDoc(docId);
+            if (currentDoc) {
+              const docUpdateBin = generateDocUpdate(currentDoc.bin, docData);
+              await docStorage.pushDocUpdate({
+                docId: docId,
+                bin: docUpdateBin,
+              });
+            } else {
+              // Doc is new to this workspace — push it directly
+              await docStorage.pushDocUpdate({
+                docId: docId,
+                bin: docData,
+              });
+            }
+          }
+        }
+      }
+
+      // Restore Blobs
+      await this.restoreBlobs(zip, blobStorage, blobManifest);
+
+      return workspaceMeta.id;
+    } finally {
+      dispose();
+    }
+  }
+
+  private async importAsNewWorkspace(
+    zip: JSZip,
+    workspaceId: string,
+    blobManifest: Record<string, { mime: string; size: number }>
+  ): Promise<string> {
+    // Create IndexedDB storage directly with the backup's workspace ID
+    const docStorage = new IndexedDBDocStorage({
+      id: workspaceId,
+      flavour: 'local',
+      type: 'workspace',
+    });
+    docStorage.connection.connect();
+    await docStorage.connection.waitForConnected();
+
+    const blobStorage = new IndexedDBBlobStorage({
+      id: workspaceId,
+      flavour: 'local',
+      type: 'workspace',
+    });
+    blobStorage.connection.connect();
+    await blobStorage.connection.waitForConnected();
+
+    try {
+      // Restore Docs
+      const docsFolder = zip.folder('docs');
+      if (docsFolder) {
+        const docEntries = Object.entries(docsFolder.files).filter(
+          ([path, entry]) => path.startsWith('docs/') && !entry.dir
+        );
+
+        for (const [filePath, entry] of docEntries) {
+          const fileName = filePath.split('/').pop();
+          if (!fileName) continue;
+          const docId = fileName.replace('.bin', '');
+          const docData = await entry.async('uint8array');
+          if (docData) {
+            await docStorage.pushDocUpdate({
+              docId: docId,
+              bin: docData,
+            });
+          }
+        }
+      }
+
+      // Restore Blobs
+      await this.restoreBlobs(zip, blobStorage, blobManifest);
+
+      // Register workspace ID in localStorage
+      setLocalWorkspaceIds(ids => [...ids, workspaceId]);
+
+      // Notify other browser tabs about the new workspace
+      const channel = new BroadcastChannel(
+        LOCAL_WORKSPACE_CHANGED_BROADCAST_CHANNEL_KEY
+      );
+      channel.postMessage(workspaceId);
+      channel.close();
+
+      return workspaceId;
+    } finally {
+      docStorage.connection.disconnect();
+      blobStorage.connection.disconnect();
+    }
+  }
+
+  private async restoreBlobs(
+    zip: JSZip,
+    blobStorage: {
+      set: (blob: {
+        key: string;
+        data: Uint8Array;
+        mime: string;
+      }) => Promise<void>;
+    },
+    blobManifest: Record<string, { mime: string; size: number }>
+  ): Promise<void> {
+    const blobsFolder = zip.folder('blobs');
+    if (blobsFolder) {
+      const blobEntries = Object.entries(blobsFolder.files).filter(
+        ([path, entry]) => path.startsWith('blobs/') && !entry.dir
+      );
+
+      for (const [filePath, entry] of blobEntries) {
+        const key = filePath.split('/').pop();
+        if (!key) continue;
+        const blobData = await entry.async('uint8array');
+        if (blobData) {
+          const mime = blobManifest[key]?.mime || 'application/octet-stream';
+          await blobStorage.set({
+            key,
+            data: blobData,
+            mime,
+          });
+        }
+      }
     }
   }
 

@@ -47,6 +47,24 @@ export const BackupGroup = () => {
     }
   }, [backupService, workspacesService]);
 
+  const handleSyncFromBackup = useCallback(async () => {
+    if (!workspaceId) {
+      notify.error({ title: 'No active workspace to sync into' });
+      return;
+    }
+    setLoading(true);
+    try {
+      await backupService.importBackup(undefined, workspaceId);
+      notify.success({ title: 'Synced from backup successfully' });
+    } catch (e: any) {
+      if (e.message !== 'No file selected') {
+        notify.error({ title: 'Sync failed', message: e.message });
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [backupService, workspaceId]);
+
   return (
     <SettingGroup title="Backup">
       <RowLayout
@@ -64,6 +82,15 @@ export const BackupGroup = () => {
           handleImport().catch(e => {
             console.error(e);
             notify.error({ title: 'Import failed', message: e.message });
+          });
+        }}
+      />
+      <RowLayout
+        label={loading ? 'Processing...' : 'Sync from Backup'}
+        onClick={() => {
+          handleSyncFromBackup().catch(e => {
+            console.error(e);
+            notify.error({ title: 'Sync failed', message: e.message });
           });
         }}
       />
