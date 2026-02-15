@@ -43,86 +43,102 @@ export class WebBackupService extends BaseBackupService {
     )
   );
 
+  private async generateBackupZipBlob(workspaceId: string): Promise<Blob> {
+    const workspaceMeta = this.workspacesService.list.workspaces$.value.find(
+      w => w.id === workspaceId
+    );
+    if (!workspaceMeta) {
+      throw new Error('Workspace not found');
+    }
+    const { workspace, dispose } = this.workspacesService.open({
+      metadata: workspaceMeta,
+    });
+
+    try {
+      // Wait for root doc to be ready before exporting
+      await workspace.engine.doc.waitForDocReady(workspace.id);
+
+      const zip = new JSZip();
+
+      // 1. Export Info
+      const info = {
+        workspaceId,
+        createdAt: new Date().toISOString(),
+        version: 1,
+      };
+      zip.file('info.json', JSON.stringify(info, null, 2));
+
+      // 2. Export Docs (Yjs binary updates)
+      const docStorage = workspace.engine.doc.storage;
+      const docTimestamps = await docStorage.getDocTimestamps();
+      const docsFolder = zip.folder('docs');
+
+      if (docsFolder) {
+        for (const docId of Object.keys(docTimestamps)) {
+          const doc = await docStorage.getDoc(docId);
+          if (doc) {
+            docsFolder.file(docId + '.bin', doc.bin);
+          }
+        }
+      }
+
+      // 3. Export Blobs with metadata manifest
+      const blobStorage = workspace.engine.blob.storage;
+      const blobsList = await blobStorage.list();
+      const blobsFolder = zip.folder('blobs');
+
+      const blobManifest: Record<string, { mime: string; size: number }> = {};
+
+      if (blobsFolder) {
+        for (const blobRecord of blobsList) {
+          const blob = await blobStorage.get(blobRecord.key);
+          if (blob) {
+            blobsFolder.file(blobRecord.key, blob.data);
+            blobManifest[blobRecord.key] = {
+              mime: blob.mime,
+              size: blobRecord.size,
+            };
+          }
+        }
+      }
+      zip.file('blobs.json', JSON.stringify(blobManifest, null, 2));
+
+      return await zip.generateAsync({ type: 'blob' });
+    } finally {
+      dispose();
+    }
+  }
+
   async downloadBackup(workspaceId: string) {
     this.isLoading$.setValue(true);
     try {
-      const workspaceMeta = this.workspacesService.list.workspaces$.value.find(
-        w => w.id === workspaceId
-      );
-      if (!workspaceMeta) {
-        throw new Error('Workspace not found');
-      }
-      const { workspace, dispose } = this.workspacesService.open({
-        metadata: workspaceMeta,
-      });
-
-      try {
-        // Wait for root doc to be ready before exporting
-        await workspace.engine.doc.waitForDocReady(workspace.id);
-
-        const zip = new JSZip();
-
-        // 1. Export Info
-        const info = {
-          workspaceId,
-          createdAt: new Date().toISOString(),
-          version: 1,
-        };
-        zip.file('info.json', JSON.stringify(info, null, 2));
-
-        // 2. Export Docs (Yjs binary updates)
-        const docStorage = workspace.engine.doc.storage;
-        const docTimestamps = await docStorage.getDocTimestamps();
-        const docsFolder = zip.folder('docs');
-
-        if (docsFolder) {
-          for (const docId of Object.keys(docTimestamps)) {
-            const doc = await docStorage.getDoc(docId);
-            if (doc) {
-              docsFolder.file(docId + '.bin', doc.bin);
-            }
-          }
-        }
-
-        // 3. Export Blobs with metadata manifest
-        const blobStorage = workspace.engine.blob.storage;
-        const blobsList = await blobStorage.list();
-        const blobsFolder = zip.folder('blobs');
-
-        const blobManifest: Record<string, { mime: string; size: number }> = {};
-
-        if (blobsFolder) {
-          for (const blobRecord of blobsList) {
-            const blob = await blobStorage.get(blobRecord.key);
-            if (blob) {
-              blobsFolder.file(blobRecord.key, blob.data);
-              blobManifest[blobRecord.key] = {
-                mime: blob.mime,
-                size: blobRecord.size,
-              };
-            }
-          }
-        }
-        zip.file('blobs.json', JSON.stringify(blobManifest, null, 2));
-
-        // Generate and trigger download
-        const content = await zip.generateAsync({ type: 'blob' });
-        const url = URL.createObjectURL(content);
-        const a = document.createElement('a');
-        a.href = url;
-        const timestamp = new Date()
-          .toISOString()
-          .replace(/[:.]/g, '-')
-          .slice(0, 19);
-        a.download = `workspace-backup-${timestamp}.zip`;
-        a.click();
-        URL.revokeObjectURL(url);
-      } finally {
-        dispose();
-      }
+      const content = await this.generateBackupZipBlob(workspaceId);
+      const url = URL.createObjectURL(content);
+      const a = document.createElement('a');
+      a.href = url;
+      const timestamp = new Date()
+        .toISOString()
+        .replace(/[:.]/g, '-')
+        .slice(0, 19);
+      a.download = `workspace-backup-${timestamp}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
     } catch (e) {
       console.error('Failed to export backup.', e);
       this.error$.setValue(e);
+    } finally {
+      this.isLoading$.setValue(false);
+    }
+  }
+
+  async exportBackupAsQrVideo(workspaceId: string): Promise<Blob> {
+    this.isLoading$.setValue(true);
+    try {
+      return await this.generateBackupZipBlob(workspaceId);
+    } catch (e) {
+      console.error('Failed to generate backup for QR video.', e);
+      this.error$.setValue(e);
+      throw e;
     } finally {
       this.isLoading$.setValue(false);
     }

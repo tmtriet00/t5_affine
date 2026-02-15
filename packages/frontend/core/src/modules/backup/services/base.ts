@@ -20,6 +20,7 @@ export abstract class BaseBackupService extends Service {
     file?: File,
     targetWorkspaceId?: string
   ): Promise<string>;
+  abstract exportBackupAsQrVideo(workspaceId: string): Promise<Blob>;
 }
 
 export const BackupService =

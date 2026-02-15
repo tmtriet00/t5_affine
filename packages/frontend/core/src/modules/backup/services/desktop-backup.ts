@@ -76,6 +76,10 @@ export class DesktopBackupService extends BaseBackupService {
     return '';
   }
 
+  async exportBackupAsQrVideo(_workspaceId: string): Promise<Blob> {
+    throw new Error('Not supported on desktop platform');
+  }
+
   override dispose(): void {
     this.revalidate.unsubscribe();
   }

@@ -16,6 +16,7 @@ import { EnableCloudDialog } from './enable-cloud';
 import { ImportDialog } from './import';
 import { ImportTemplateDialog } from './import-template';
 import { ImportWorkspaceDialog } from './import-workspace';
+import { QrVideoExportDialog } from './qr-video-export-dialog';
 import { CollectionSelectorDialog } from './selectors/collection';
 import { DateSelectorDialog } from './selectors/date';
 import { DocSelectorDialog } from './selectors/doc';
@@ -48,6 +49,7 @@ const WORKSPACE_DIALOGS = {
   'date-selector': DateSelectorDialog,
   setting: SettingDialog,
   import: ImportDialog,
+  'qr-video-export': QrVideoExportDialog,
 } satisfies {
   [key in keyof WORKSPACE_DIALOG_SCHEMA]?: React.FC<
     DialogComponentProps<WORKSPACE_DIALOG_SCHEMA[key]>

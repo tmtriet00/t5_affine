@@ -27,12 +27,14 @@ import {
   DownloadIcon,
   LocalWorkspaceIcon,
   MoreVerticalIcon,
+  QrCodePanelIcon,
   UploadIcon,
 } from '@blocksuite/icons/rc';
 import { useLiveData, useService } from '@toeverything/infra';
 import bytes from 'bytes';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { WorkspaceDialogService } from '../../../../../modules/dialogs';
 import * as styles from './styles.css';
 
 const Empty = () => {
@@ -201,25 +203,40 @@ const WebBackupWorkspaceItem = ({ meta }: { meta: WorkspaceMetadata }) => {
   const backupService = useService(BackupService);
   const profileService = useService(WorkspaceProfileService);
   const profile = useLiveData(profileService.getProfile(meta).profile$);
+  const workspaceDialogService = useService(WorkspaceDialogService);
 
   if (!profile) return null;
 
   return (
-    <div data-testid="backup-workspace-item" className={styles.listItem}>
-      <Avatar colorfulFallback name={profile.name} rounded={4} size={32} />
-      <div className={styles.listItemLeftLabel}>
-        <div className={styles.listItemLeftLabelTitle}>{profile.name}</div>
-        <div className={styles.listItemLeftLabelDesc}>{'Local Workspace'}</div>
+    <>
+      <div data-testid="backup-workspace-item" className={styles.listItem}>
+        <Avatar colorfulFallback name={profile.name} rounded={4} size={32} />
+        <div className={styles.listItemLeftLabel}>
+          <div className={styles.listItemLeftLabelTitle}>{profile.name}</div>
+          <div className={styles.listItemLeftLabelDesc}>
+            {'Local Workspace'}
+          </div>
+        </div>
+        <div className={styles.listItemRightLabel}>
+          <IconButton
+            onClick={() =>
+              workspaceDialogService.open('qr-video-export', {
+                workspaceId: meta.id,
+              })
+            }
+            tooltip="Export as QR Video"
+          >
+            <QrCodePanelIcon />
+          </IconButton>
+          <IconButton
+            onClick={() => void backupService.downloadBackup(meta.id)}
+            tooltip="Export to ZIP"
+          >
+            <DownloadIcon />
+          </IconButton>
+        </div>
       </div>
-      <div className={styles.listItemRightLabel}>
-        <IconButton
-          onClick={() => void backupService.downloadBackup(meta.id)}
-          tooltip="Export to ZIP"
-        >
-          <DownloadIcon />
-        </IconButton>
-      </div>
-    </div>
+    </>
   );
 };
 

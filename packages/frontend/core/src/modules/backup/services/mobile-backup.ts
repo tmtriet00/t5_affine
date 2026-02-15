@@ -353,6 +353,10 @@ export class MobileBackupService extends BaseBackupService {
     throw new Error('Not supported on mobile platform');
   }
 
+  async exportBackupAsQrVideo(_workspaceId: string): Promise<Blob> {
+    throw new Error('Not supported on mobile platform');
+  }
+
   override dispose(): void {
     this.revalidate.unsubscribe();
   }
